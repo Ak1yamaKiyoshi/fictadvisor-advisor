@@ -1,18 +1,22 @@
 from run import MistralChatWrapper, WrapperLLM, mistral_api_key, FileScrapper, split_text_into_chunks
 import sys
+import os
 import re
 from PyQt5.QtCore import QEvent, Qt
 from PyQt5.QtGui import QFont, QTextCursor
 from PyQt5.QtWidgets import QApplication, QFileDialog, QComboBox, QHBoxLayout, QWidget, QVBoxLayout, QPushButton, QTextEdit, QScrollArea, QMessageBox
+from PyQt5.QtCore import QTimer
 
 class MistralChatApp(QWidget):
     def __init__(self):
         super().__init__()
         self.llm = None
+        self.font_size = 32
         self.setup()
 
     def setup(self):
         self.setup_llm()
+        self.init_system_prompt()
         self.init_ui()
         self.update_chat_history()
         self.files_to_embed = []
@@ -24,6 +28,27 @@ class MistralChatApp(QWidget):
         )
         mistralLLM.setup()
         self.llm = WrapperLLM(mistralLLM)
+
+    def init_system_prompt(self):
+        if 'system_prompt.txt' in os.listdir():
+            with open("./system_prompt.txt", "r+") as f:
+                system_prompt = f.read()
+            self.llm.set_system_prompt(system_prompt)
+        else:
+            with open("./system_prompt.txt", "w+") as f:
+                f.write(self.llm.history[0]['content'])
+
+    def write_system_prompt(self):
+        with open("./system_prompt.txt", "w+") as f:
+            f.write(self.llm.history[0]['content'])
+
+    def cache_conversation(self):
+        self.write_system_prompt()
+        with open("./cached_conversation.txt", 'w+') as f:
+            for message in self.llm.history:
+                f.write(f"\n{message['role']}: ")
+                for line in message['content']:
+                    f.write(line)
 
     def init_ui(self):
         self.setWindowTitle("Mistral Chat")
@@ -101,6 +126,29 @@ class MistralChatApp(QWidget):
         self.delete_embedding.setFixedSize(25, 25)
         button_layout.addWidget(self.delete_embedding)
 
+        # Reload button
+        self.reload_button = QPushButton("R")
+        self.reload_button.clicked.connect(self.update_chat_history)
+        self.reload_button.setFixedSize(25, 25)
+        button_layout.addWidget(self.reload_button)
+
+        # bigger font
+        self.bigger_font = QPushButton("F+")
+        self.bigger_font.clicked.connect(self.increase_font)
+        self.bigger_font.setFixedSize(25, 25)
+        button_layout.addWidget(self.bigger_font)
+
+        self.lesser_font = QPushButton("F-")
+        self.lesser_font.clicked.connect(self.decrease_font)
+        self.lesser_font.setFixedSize(25, 25)
+        button_layout.addWidget(self.lesser_font)
+        # smaller fotn
+    def increase_font(self):
+        self.font_size += 1
+        self.update_chat_history()
+    def decrease_font(self):
+        self.font_size -= 1
+        self.update_chat_history()
     def delete_last_embedding(self):
         from colorama import Fore, init, Style
         self.files_to_embed = self.files_to_embed[:-1]
@@ -123,6 +171,7 @@ class MistralChatApp(QWidget):
         print(self.llm.llm.model)
 
     def send_message(self):
+        self.blink_yellow()
         system_prompt = self.system_prompt_editor.toPlainText()
         user_message = self.user_input.toPlainText()
 
@@ -134,12 +183,13 @@ class MistralChatApp(QWidget):
 
         self.llm.invoke(user_message)
         self.update_chat_history()
+        self.blink_green()
 
     def get_embeddings(self, query):
         if not self.files_to_embed:
             return
 
-        file_path = self.files_to_embed[-1] #FileScrapper().find_file('', )
+        file_path = self.files_to_embed[-1]
         file_content = FileScrapper().scrap_file(file_path)
         print(f" [ -- ] File content lenght: {len(file_content)}")
         file_content = split_text_into_chunks(file_content, 256)
@@ -149,28 +199,60 @@ class MistralChatApp(QWidget):
         )
         print(search)
         return "\n ".join(search)
-        #query = query.replace("$embd", str(search), 1)
-        #print(f" [ -- ] Found similarities: {len(search)}")
 
     def delete_message(self):
         self.llm.set_history(self.llm.history[:-1])
         self.update_chat_history()
 
+    def break_line(self, string, symbols):
+        lines = list()
+        for line in string.split("\n"):
+            for i in range(symbols, len(line), symbols):
+                lines.append(line[i-symbols:i])
+        return '\n'.join(lines)
+
+    def format_code(self, string):
+        while '```' in string:
+            string = string.replace("```", '<code style="color:#7bada1;">', 1)
+            string = string.replace("```", "</code>", 1)
+        return string
+
+    def blink_green(self):
+        self.blink_timer = QTimer()
+        self.blink_timer.timeout.connect(lambda x=None: self.blink('green'))
+        self.blink_timer.start(150)
+
+    def blink_yellow(self):
+        self.blink_timer = QTimer()
+        self.blink_timer.timeout.connect(lambda x=None: self.blink('yellow'))
+        self.blink_timer.start(150)
+
+    def blink(self, color):
+        if self.styleSheet() == "":
+            self.setStyleSheet("background-color: {};".format(color))
+        else:
+            self.setStyleSheet("")
+            self.blink_timer.stop()
+
     def update_chat_history(self):
         self.chat_log.clear()
 
-        html_content = '<div style="white-space: pre;" class="tip" markdown="1">'
+        html_content = f'<div style="font-size:{self.font_size}px;white-space: pre;" class="tip" markdown="1">'
         for entry in self.llm.history:
             role = entry["role"]
             content = entry["content"]
-            if role == "user":
-                html_content += f'<p"><b style="color:#dbb54d;">User:</b> {content}</p>'
-            elif role == "assistant":
+            content = self.format_code(content)
+            #content = self.break_line(content, self.font_size*10)
+            if content.startswith("USER:"):
+                html_content += '<br>'
+                html_content += f'<p><b style="color:#dbb54d;">User:     </b> {content}</p>'
+            elif role == 'system':
+                html_content += f'<p><b style="color:#abcf4b;">System:     </b> {content}</p>'
+            else:
                 html_content += f'<p><b style="color:#674ddb;">Assistant:</b> {content}</p>'
-            html_content += '<br>'
         html_content += '</div>'
         self.chat_log.setHtml(html_content)
-        print("updated")
+        self.cache_conversation()
 
     def eventFilter(self, source, event):
         if event.type() == QEvent.KeyPress:
