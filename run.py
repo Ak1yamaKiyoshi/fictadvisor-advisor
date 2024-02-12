@@ -10,6 +10,8 @@ from dotenv import load_dotenv
 import numpy as np
 import re
 
+from pprint import pprint
+
 REPOSITORIES = "./assets/repositories/"
 REPOSITORY = REPOSITORIES + "fictadvisor"
 MODEL_NAME = "mistral-medium"
@@ -330,20 +332,31 @@ class MistralChatWrapper(MistralWrapper):
         for message in history:
             if message["role"] == "system":
                 continue
-            message["content"] = f"{message['role'].upper()}: {message['content']}"
+            if message["role"].lower() == "assistant":
+                if "YOU:" not in message["content"]:
+                    message["content"] = f"YOU: {message['content']}"
+            elif message["role"].upper() not in message["content"]:
+                message["content"] = f"{message['role'].upper()}: {message['content']}"
             message["role"] = "user"
         return history
 
+    def set_history(self, val):
+        self.chat_history = val
+
     def invoke(self, query: str):
         history = self.__prepare_history(query)
-        return self.request(
+        #print(f">>>> query:{query}\n>>>>model: {self.model}")
+        response_json = self.request(
             self.model,
             temperature=self.temperature,
             messages=history,
             top_p=str(self.top_p) if not self.use_temperature else "null",
             max_tokens=self.max_tokens,
             api_key=self.api_key,
-        ).json()["choices"][0]["message"]["content"]
+        ).json()
+        response = response_json["choices"][0]["message"]["content"]
+        self.chat_history += [{"role": "assistant", "content": response}]
+        return response
 
     def embed(self, document: List[str],) -> List[float]:
         document_embeddings = self.request_embeddings(self.api_key, document)
@@ -368,6 +381,9 @@ class WrapperLLM:
     @property
     def history(self):
         return self.llm.chat_history
+
+    def set_history(self, val):
+       self.llm.set_history(val)
 
     def set_system_prompt(self, new_system_prompt: str) -> None:
         self.llm.set_system_prompt(new_system_prompt)
@@ -433,13 +449,10 @@ class Chat:
     def __init__(self):
         mistralLLM = MistralChatWrapper(
             api_key=mistral_api_key, temperature_insead_top_p=True,
+            model="mistral-medium", max_tokens=1000,
         )
         mistralLLM.setup()
         self.llm = WrapperLLM(mistralLLM)
-
-        # openaiLLM = OpenAIChatWrapper(api_key=os.getenv('OPENAI_API_KEY'))
-        # openaiLLM.setup()
-        # self.llm = WrapperLLM(openaiLLM)
 
     def run(self):
         print(
@@ -467,6 +480,9 @@ class Chat:
             )
             print(f"{Style.NORMAL} {Fore.RESET}", end="")
 
+            if query.startswith("/rollback"):
+                self.llm.set_history(self.llm.history[:-1])
+                continue
             if query == "/bye":
                 break
             # * Match File
@@ -503,6 +519,9 @@ class Chat:
                     for message in self.llm.history:
                         f.write(f" > {message['role'].upper()}: {message['content']}\n")
                 continue
+            elif query.startswith('/history'):
+                pprint(self.llm.history)
+                continue
             elif query.startswith("/system"):
                 new_system_prompt = query.split("/system")[1].strip()
                 self.llm.set_system_prompt(new_system_prompt)
@@ -517,6 +536,7 @@ class Chat:
                 continue
 
             current_time = datetime.now().strftime("%H:%M")
+            enhanced_query = "You should answer on user question. Provide only answer. User question:" + query + "\n Your answer: "
             print(
                 f"{Style.BRIGHT}{Fore.GREEN}[{current_time}] Answer: {Style.NORMAL}{Fore.RESET}{self.llm.invoke(query)}"
             )
@@ -529,5 +549,9 @@ class Chat:
 #! Add posibility to search needed files by embeddings of their names and query, and add this to $embd{}
 #! Mistral Local
 #! Ollama Local
+#! make dirs (assets, conversations, etc) if they are not existing
+#! command to restart conversation
+#! add to history both, user and ai answers.
 
-Chat().run()
+if __name__ == '__main__':
+    Chat().run()
