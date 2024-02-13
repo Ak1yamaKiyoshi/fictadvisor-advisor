@@ -345,7 +345,6 @@ class MistralChatWrapper(MistralWrapper):
 
     def invoke(self, query: str):
         history = self.__prepare_history(query)
-        #print(f">>>> query:{query}\n>>>>model: {self.model}")
         response_json = self.request(
             self.model,
             temperature=self.temperature,

@@ -1,11 +1,295 @@
-from run import MistralChatWrapper, WrapperLLM, mistral_api_key, FileScrapper, split_text_into_chunks
+from run import MistralChatWrapper, WrapperLLM, mistral_api_key, FileScrapper, split_text_into_chunks, OpenAIChatWrapper
 import sys
 import os
 import re
+from datetime import datetime
 from PyQt5.QtCore import QEvent, Qt
 from PyQt5.QtGui import QFont, QTextCursor
-from PyQt5.QtWidgets import QApplication, QFileDialog, QComboBox, QHBoxLayout, QWidget, QVBoxLayout, QPushButton, QTextEdit, QScrollArea, QMessageBox
+from PyQt5.QtWidgets import QApplication, QDialog,QLabel, QFileDialog, QComboBox, QHBoxLayout, QWidget, QVBoxLayout, QPushButton, QTextEdit, QScrollArea, QMessageBox
 from PyQt5.QtCore import QTimer
+
+from typing import List, Optional, Tuple
+class EmbeddingsBox(QWidget):
+    def __init__(self):
+        pass
+
+class ChatApp(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.llm:WrapperLLM = None
+        self.embeddings_paths:List[str] = list()
+        self.current_conversation_name = None
+
+        self.avaivable_models = ['mistral-tiny', 'mistral-small', 'mistral-medium']
+        self.font_size:int = 17
+        self.max_tokens:int = 21000
+
+        self.break_line_size = 100
+
+        self.default_model = self.avaivable_models[0]
+        self.is_start_of_conversation = True
+
+        self.init_model()
+        self.init_ui()
+
+
+    def set_max_tokens(self, value:int):
+        self.llm.llm.max_tokens = value
+
+    def get_model_by_name(self, name:str):
+        if 'mistral' in name:
+            return MistralChatWrapper
+        elif 'gpt' in name:
+            return OpenAIChatWrapper
+
+    def model_name_changed(self, model:str):
+
+        #self.llm.llm = self.get_model_by_name(model)
+        self.llm.llm.model = model
+
+    def change_model(self, model):
+        self.llm.llm = model
+
+    def cache_system_prompt(self):
+        with open("./system_prompt.txt", "w+") as f:
+            f.write(self.llm.history[0]['content'])
+
+    def init_model(self):
+        # llm
+        llm_class = self.get_model_by_name(self.default_model)
+        print(self.default_model)
+        print(llm_class)
+
+        llm = llm_class(
+            api_key=mistral_api_key,
+            model=self.default_model, max_tokens=21000)
+        llm.setup()
+        self.llm = WrapperLLM(llm)
+
+        # system prompt
+        if 'system_prompt.txt' in os.listdir():
+            with open("./system_prompt.txt", "r+") as f:
+                system_prompt = f.read()
+            self.llm.set_system_prompt(system_prompt)
+        else:
+            self.cache_system_prompt()
+
+    def init_conversation(self):
+        model = MistralChatWrapper(model='mistral-small', max_tokens='150', api_key=mistral_api_key)
+        model.setup()
+        name = model.invoke("Write a perfect name for conversation that starts like this: " + str(self.llm.history[1]['content']))
+        current_time = datetime.now().strftime("%H:%M")
+        self.current_conversation_name = f'./conversations/[{current_time}]_{name.replace(" ", "_").lower()}.txt'
+
+    def cache_conversation(self):
+        self.cache_system_prompt()
+        with open(self.current_conversation_name, 'w+') as f:
+            for message in self.llm.history:
+                f.write(f"\n{message['role']}: ")
+                for line in message['content']:
+                    f.write(line)
+
+    def send_message(self):
+        system_prompt = self.system_prompt_editor.toPlainText()
+        user_message = self.user_input.toPlainText()
+
+        #if "SRCH_EMBD" in user_message:
+        #    user_message += "Embeddings: " +self.get_embeddings(user_message)
+        #    user_message = user_message.replace("SRCH_EMBD", "")
+        self.user_input.clear()
+        print(system_prompt)
+        self.llm.set_system_prompt(system_prompt if system_prompt else "You are MistralAI")
+
+        self.llm.invoke(user_message)
+        self.update_chat_history()
+
+        if self.is_start_of_conversation:
+            self.is_start_of_conversation = False
+            self.init_conversation()
+        #self.blink_green()
+
+    def update_chat_history(self):
+        self.chat_log.clear()
+
+        html_content = f'<div style="font-size:{self.font_size}px;white-space: pre;" class="tip" markdown="1">'
+        for entry in self.llm.history:
+            role = entry["role"]
+            content = entry["content"]
+            #content = self.format_code(content)
+            if role.lower() == 'user':
+                html_content += self.__user_message_wrapper_html(content)
+            elif role.lower() == 'system':
+                html_content += self.__system_message_wrapper_html(content)
+            elif role.lower() == 'assistant':
+                html_content += self.__assistant_message_wrapper_html(content)
+            html_content += '<br>'
+        html_content += '</div>'
+
+        self.chat_log.setHtml(html_content)
+        if not self.is_start_of_conversation:
+            self.cache_conversation()
+
+    def __user_message_wrapper_html(self, content):
+        return f"""<b style="color:rgb(200, 180, 0);font-weight:1200;">User:</b><br><code>{content}</code>"""
+    def __assistant_message_wrapper_html(self, content):
+        return f"""<b style="color:rgb(58, 0, 214);font-weight:1200;">Assistant:</b><br><code>{content}</code>"""
+    def __system_message_wrapper_html(self, content):
+        return f'{content}'
+
+    def eventFilter(self, source, event):
+        if event.type() == QEvent.KeyPress:
+            if event.key() == Qt.Key_Enter and event.modifiers() != Qt.ShiftModifier:
+                self.send_message()
+                return True
+            elif event.key() == Qt.Key_Escape:  # Handle Esc key to close the window
+                self.close()
+                return True
+        return super().eventFilter(source, event)
+
+    def init_ui(self):
+        self.setWindowTitle("Mistral Chat")
+        self.setGeometry(100, 100, 400, 600)
+        self.setWindowFlags(Qt.Window | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint | Qt.WindowStaysOnTopHint)
+
+        # Layouts
+        layout = QVBoxLayout()
+
+        # Outputs
+        self.chat_log = QTextEdit()
+        self.chat_log.setPlaceholderText("Here will be conversation log")
+        self.chat_log.setWordWrapMode(True)
+        layout.addWidget(self.chat_log)
+
+        upper_part_layout = QHBoxLayout()
+        layout.addLayout(upper_part_layout)
+        prompt_layout = QVBoxLayout()
+        upper_part_layout.addLayout(prompt_layout)
+        button_layout = QVBoxLayout()
+        upper_part_layout.addLayout(button_layout)
+
+        # System prompt
+        self.system_prompt_editor = QTextEdit()
+        self.system_prompt_editor.setPlaceholderText(" Your System Prompt here. ")
+        self.system_prompt_editor.font = QFont('Monospace')
+        self.system_prompt_editor.setFixedHeight(70)
+        prompt_layout.addWidget(self.system_prompt_editor)
+        self.system_prompt_editor.setText(self.llm.history[0]['content'])
+
+        # User input
+        self.user_input = QTextEdit()
+        self.user_input.setPlaceholderText(" Your Query here. \n include SRCH_EMBD to append found embeddings, if files to embed added.  ")
+        self.user_input.font = QFont('Monospace')
+        self.user_input.installEventFilter(self)
+        self.user_input.setFixedHeight(140)
+        prompt_layout.addWidget(self.user_input)
+        button_layout.addSpacing(1)
+
+        # Model Combo Box
+        self.model_combo = QComboBox()
+        for model in ['mistral-tiny', 'mistral-small', 'mistral-medium']:
+            self.model_combo.addItem(model)
+        self.model_combo.setFixedWidth(25)
+        button_layout.addWidget(self.model_combo)
+        self.model_combo.currentTextChanged.connect(self.model_name_changed)
+
+        # Delete button
+        self.delete_button = QPushButton("X")
+        button_layout.addWidget(self.delete_button)
+        self.delete_button.clicked.connect(self.delete_message)
+        self.delete_button.setFixedHeight(25)
+        self.delete_button.setFixedWidth(25)
+
+        # Send button
+        self.send_button = QPushButton(">")
+        button_layout.addWidget(self.send_button)
+        self.send_button.clicked.connect(self.send_message)
+        self.send_button.setFixedHeight(25)
+        self.send_button.setFixedWidth(25)
+        self.setLayout(layout)
+
+        self.add_embedding_button = QPushButton("E(+)")
+        self.add_embedding_button.setFixedSize(25, 25)
+        button_layout.addWidget(self.add_embedding_button)
+
+        # Add embedings modal
+        self.add_embedding_box = QDialog(self)
+        self.add_embedding_button.clicked.connect(self.add_embedding_box.exec_)
+
+        self.embeddings_list = QTextEdit()
+        if self.embeddings_paths != None and len(self.embeddings_paths) > 0:
+            self.embeddings_list.setText("[" + ", ".join([f'"{path}",' for path in self.embeddings_paths]))
+        embedding_box_layout = QVBoxLayout()
+        self.add_embedding_box.setLayout(embedding_box_layout)
+        embedding_box_layout.addWidget(QLabel(text="To remove path, erase line with that path.\n To save, press submit button"))
+        embedding_box_layout.addWidget(self.embeddings_list)
+        embedding_box_add_path_button = QPushButton("Add path")
+        embedding_box_add_path_button.clicked.connect(self.handle_add_file_path_to_embedding_file_paths)
+        embedding_box_layout.addWidget(embedding_box_add_path_button)
+        embedding_box_layout_save_paths = QPushButton("Submit")
+        embedding_box_layout_save_paths.clicked.connect(self.handle_text_edit_at_embedding_box)
+        embedding_box_layout.addWidget(embedding_box_layout_save_paths)
+
+        # Reload button
+        self.reload_button = QPushButton("R")
+        self.reload_button.clicked.connect(self.update_chat_history)
+        self.reload_button.setFixedSize(25, 25)
+        button_layout.addWidget(self.reload_button)
+
+        # bigger font
+        self.bigger_font = QPushButton("F+")
+        self.bigger_font.clicked.connect(self.increase_font)
+        self.bigger_font.setFixedSize(25, 25)
+        button_layout.addWidget(self.bigger_font)
+
+        self.lesser_font = QPushButton("F-")
+        self.lesser_font.clicked.connect(self.decrease_font)
+        self.lesser_font.setFixedSize(25, 25)
+        button_layout.addWidget(self.lesser_font)
+
+    def increase_font(self):
+        self.font_size += 1
+        self.update_chat_history()
+
+    def decrease_font(self):
+        self.font_size -= 1
+        self.update_chat_history()
+
+    def delete_message(self):
+        self.llm.set_history(self.llm.history[:-1])
+        self.update_chat_history()
+
+    def handle_add_file_path_to_embedding_file_paths(self):
+        from colorama import Fore, init, Style
+        self.embeddings_paths += self.open_file_dialog()
+        print(f"{Style.BRIGHT}{Fore.GREEN} Embeddings: {self.embeddings_paths} {Style.RESET_ALL}")
+        if self.embeddings_paths != None and len(self.embeddings_paths) > 0:
+            self.embeddings_list.setText("\n".join( self.embeddings_paths))
+
+    def open_file_dialog(self):
+        options = QFileDialog.Options()
+        options |= QFileDialog.DontUseNativeDialog
+        file_names, _ = QFileDialog.getOpenFileNames(self, "Select Files", "", "All Files (*);;Text Files (*.txt)", options=options)
+        return file_names
+
+    def handle_text_edit_at_embedding_box(self):
+        from colorama import Fore, init, Style
+        self.embeddings_paths =[
+            path for path in self.embeddings_list.toPlainText().split("\n") if path.strip() != ""
+        ]
+        print(f"{Style.BRIGHT}{Fore.YELLOW} Embeddings: {self.embeddings_paths} {Style.RESET_ALL}")
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 class MistralChatApp(QWidget):
@@ -24,7 +308,7 @@ class MistralChatApp(QWidget):
 
     def setup_llm(self):
         mistralLLM = MistralChatWrapper(
-            api_key=mistral_api_key, temperature_insead_top_p=True,
+            api_key=mistral_api_key,
             model="mistral-tiny", max_tokens=21000)
         mistralLLM.setup()
         self.llm = WrapperLLM(mistralLLM)
@@ -265,9 +549,20 @@ class MistralChatApp(QWidget):
                 return True
         return super().eventFilter(source, event)
 
+
+
+
+
+
+
+
+
+
+
+
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    window = MistralChatApp()
+    window = ChatApp()
     window.show()
     sys.exit(app.exec())
 
