@@ -7,6 +7,7 @@ from PyQt5.QtGui import QFont, QTextCursor
 from PyQt5.QtWidgets import QApplication, QFileDialog, QComboBox, QHBoxLayout, QWidget, QVBoxLayout, QPushButton, QTextEdit, QScrollArea, QMessageBox
 from PyQt5.QtCore import QTimer
 
+
 class MistralChatApp(QWidget):
     def __init__(self):
         super().__init__()
@@ -24,8 +25,7 @@ class MistralChatApp(QWidget):
     def setup_llm(self):
         mistralLLM = MistralChatWrapper(
             api_key=mistral_api_key, temperature_insead_top_p=True,
-            model="mistral-tiny", max_tokens=21000,
-        )
+            model="mistral-tiny", max_tokens=21000)
         mistralLLM.setup()
         self.llm = WrapperLLM(mistralLLM)
 
@@ -142,13 +142,16 @@ class MistralChatApp(QWidget):
         self.lesser_font.clicked.connect(self.decrease_font)
         self.lesser_font.setFixedSize(25, 25)
         button_layout.addWidget(self.lesser_font)
-        # smaller fotn
+
+
     def increase_font(self):
         self.font_size += 1
         self.update_chat_history()
+
     def decrease_font(self):
         self.font_size -= 1
         self.update_chat_history()
+
     def delete_last_embedding(self):
         from colorama import Fore, init, Style
         self.files_to_embed = self.files_to_embed[:-1]
@@ -168,10 +171,8 @@ class MistralChatApp(QWidget):
 
     def model_name_changed(self, model:str):
         self.llm.llm.model = model
-        print(self.llm.llm.model)
 
     def send_message(self):
-        self.blink_yellow()
         system_prompt = self.system_prompt_editor.toPlainText()
         user_message = self.user_input.toPlainText()
 
@@ -201,6 +202,7 @@ class MistralChatApp(QWidget):
         return "\n ".join(search)
 
     def delete_message(self):
+        self.blink_yellow()
         self.llm.set_history(self.llm.history[:-1])
         self.update_chat_history()
 
@@ -212,9 +214,9 @@ class MistralChatApp(QWidget):
         return '\n'.join(lines)
 
     def format_code(self, string):
-        while '```' in string:
-            string = string.replace("```", '<code style="color:#7bada1;">', 1)
-            string = string.replace("```", "</code>", 1)
+        #while '```' in string:
+        #    string = string.replace("```", '<code style="color:#7bada1;">', 1)
+        #    string = string.replace("```", "</code>", 1)
         return string
 
     def blink_green(self):
@@ -242,7 +244,6 @@ class MistralChatApp(QWidget):
             role = entry["role"]
             content = entry["content"]
             content = self.format_code(content)
-            #content = self.break_line(content, self.font_size*10)
             if content.startswith("USER:"):
                 html_content += '<br>'
                 html_content += f'<p><b style="color:#dbb54d;">User:     </b> {content}</p>'
@@ -269,3 +270,7 @@ if __name__ == "__main__":
     window = MistralChatApp()
     window.show()
     sys.exit(app.exec())
+
+
+#! Save conversations by summarizing first message
+#!
