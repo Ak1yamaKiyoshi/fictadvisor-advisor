@@ -267,6 +267,22 @@ class ChatApp(QWidget):
         self.lesser_font.setFixedSize(25, 25)
         button_layout.addWidget(self.lesser_font)
 
+        self.save_output = QPushButton("S(O)")
+        self.save_output.clicked.connect(self.save_what_on_output)
+        self.save_output.setFixedSize(25, 25)
+        button_layout.addWidget(self.save_output)
+
+    def save_what_on_output(self):
+        options = QFileDialog.Options()
+        options |= QFileDialog.DontUseNativeDialog
+        fileName, _ = QFileDialog.getSaveFileName(self,
+            "Save File", "", "All Files(*);;Text Files(*.txt)", options = options)
+        if fileName:
+            with open(fileName, 'w') as f:
+                f.write(self.chat_log.toPlainText())
+            self.fileName = fileName
+            #self.setWindowTitle(str(os.path.basename(fileName)) + " - Notepad Alpha[*]")
+
     def increase_font(self):
         self.font_size += 1
         self.update_chat_history()
